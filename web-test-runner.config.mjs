@@ -62,6 +62,9 @@ const config = {
     'test/core/**/*.js',
     'test/ext/**/*.js'
   ],
+  exclude: [
+    'test/ext/idiomorph-fast.bench.js'
+  ],
   reporters: [summaryReporter({ flatten: false, reportTestLogs: false, reportTestErrors: true }), defaultReporter({ reportTestProgress: true, reportTestResults: true })]
 }
 

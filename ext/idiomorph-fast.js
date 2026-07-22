@@ -29,6 +29,16 @@
         return parseContent(elt, doc)
       }
       if (elt.nodeType === 1 || elt.nodeType === 11 || elt.nodeType === 9) return elt
+      if (typeof elt.length === 'number') {
+        doc = doc || (typeof document !== 'undefined' ? document : null)
+        if (!doc) return null
+        const dummyParent = doc.createElement('div')
+        dummyParent._idfMultiRoot = true
+        for (let i = 0; i < elt.length; i++) {
+          dummyParent.appendChild(elt[i])
+        }
+        return dummyParent
+      }
       return null
     }
 
@@ -110,6 +120,7 @@
 
     function createMorphContext(oldNode, newContent, config) {
       const mergedConfig = Object.assign({}, defaults, config)
+      mergedConfig.callbacks = Object.assign({}, defaults.callbacks, config.callbacks || {})
       return {
         target: oldNode,
         newContent,
@@ -165,12 +176,19 @@
       const ctx = createMorphContext(oldNode, newNode, config)
       const result = saveAndRestoreFocus(ctx, () => {
         if (ctx.config.morphStyle === 'innerHTML') {
-          morphChildren(ctx, oldNode, newNode)
+          if (newNode._idfMultiRoot) {
+            morphChildren(ctx, oldNode, newNode)
+          } else {
+            const wrapper = doc.createElement('div')
+            wrapper.appendChild(doc.importNode(newNode, true))
+            morphChildren(ctx, oldNode, wrapper)
+          }
           return Array.from(oldNode.childNodes)
         } else if (newNode._idfMultiRoot) {
           if (oldNode.parentNode) {
-            morphChildren(ctx, oldNode.parentNode, newNode, oldNode, oldNode.nextSibling)
-            return Array.from(oldNode.parentNode.childNodes)
+            const oldParent = oldNode.parentNode
+            morphChildren(ctx, oldParent, newNode, oldNode, oldNode.nextSibling)
+            return Array.from(oldParent.childNodes)
           } else {
             morphChildren(ctx, oldNode, newNode)
             return Array.from(oldNode.childNodes)

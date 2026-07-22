@@ -1,5 +1,9 @@
 import '../../ext/idiomorph-fast.js'
 
+function createDocFragment() {
+  return document.createDocumentFragment()
+}
+
 describe('idiomorph-fast morph extension', function() {
   beforeEach(function() {
     clearWorkArea()
@@ -10,6 +14,48 @@ describe('idiomorph-fast morph extension', function() {
     // Verify by using it with hx-swap via a simple htmx interaction
     var btn = make('<button hx-get="/test" hx-swap="morph" hx-trigger="click">click</button>')
     btn.should.exist
+  })
+
+  it('morphs via fragment.children (handleSwap path)', function() {
+    var div = make('<div class="old">content</div>')
+    var parent = div.parentNode
+    var frag = createDocFragment()
+    var newSpan = document.createElement('span')
+    newSpan.className = 'new'
+    newSpan.textContent = 'updated'
+    frag.appendChild(newSpan)
+    var result = IdiomorphFast.morph(div, frag.children)
+    Array.isArray(result).should.be.true
+    // outerHTML replaced the div with the span
+    var span = parent.querySelector('span')
+    span.should.exist
+    span.getAttribute('class').should.equal('new')
+    span.innerHTML.should.equal('updated')
+    parent.contains(div).should.be.false
+  })
+
+  it('morphs via fragment.children with innerHTML', function() {
+    var div = make('<div class="old">content</div>')
+    var frag = createDocFragment()
+    var newSpan = document.createElement('span')
+    newSpan.className = 'new'
+    newSpan.textContent = 'updated'
+    frag.appendChild(newSpan)
+    IdiomorphFast.morph(div, frag.children, { morphStyle: 'innerHTML' })
+    var span = div.querySelector('span')
+    span.should.exist
+    span.getAttribute('class').should.equal('new')
+    span.innerHTML.should.equal('updated')
+  })
+
+  it('morphs via array of nodes', function() {
+    var div = make('<div id="root">old</div>')
+    var span = document.createElement('span')
+    span.id = 'a'
+    span.textContent = 'A'
+    IdiomorphFast.morph(div, [span], { morphStyle: 'innerHTML' })
+    div.children.length.should.equal(1)
+    div.children[0].id.should.equal('a')
   })
 
   it('morphs attributes on existing node', function() {
