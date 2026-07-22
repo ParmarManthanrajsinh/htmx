@@ -14,16 +14,7 @@ export var IdiomorphFast = (function () {
       afterNodeMorphed: noOp,
       beforeNodeRemoved: noOp,
       afterNodeRemoved: noOp,
-      beforeAttributeUpdated: noOp,
     },
-    head: {
-      style: "merge",
-      shouldPreserve: (elt) => elt.getAttribute && elt.getAttribute("im-preserve") === "true",
-      shouldReAppend: (elt) => elt.getAttribute && elt.getAttribute("im-re-append") === "true",
-      shouldRemove: noOp,
-      afterHeadMorphed: noOp,
-    },
-    restoreFocus: true,
   };
 
   function normalizeParent(elt) {
@@ -34,33 +25,6 @@ export var IdiomorphFast = (function () {
 
   function createMorphContext(oldNode, newContent, config) {
     const mergedConfig = Object.assign({}, defaults, config);
-    const idMap = new Map();
-    const persistentIds = new Set();
-
-    function populateIdMap(node) {
-      if (node && node.nodeType === 1) {
-        const id = node.getAttribute ? node.getAttribute("id") : null;
-        if (id) {
-          persistentIds.add(id);
-          let curr = node;
-          while (curr) {
-            let idSet = idMap.get(curr);
-            if (!idSet) {
-              idSet = new Set();
-              idMap.set(curr, idSet);
-            }
-            idSet.add(id);
-            curr = curr.parentNode;
-          }
-        }
-        for (let child = node.firstChild; child; child = child.nextSibling) {
-          populateIdMap(child);
-        }
-      }
-    }
-
-    populateIdMap(oldNode);
-
     const doc = oldNode.ownerDocument || (typeof document !== 'undefined' ? document : null);
     const pantry = (doc && doc.createElement) ? doc.createElement("div") : { firstChild: null, appendChild() {} };
 
@@ -68,8 +32,8 @@ export var IdiomorphFast = (function () {
       target: oldNode,
       newContent,
       config: mergedConfig,
-      idMap,
-      persistentIds,
+      idMap: new Map(),
+      persistentIds: new Set(),
       callbacks: mergedConfig.callbacks,
       pantry
     };
@@ -92,11 +56,14 @@ export var IdiomorphFast = (function () {
     insertionPoint = insertionPoint || oldParent.firstChild;
 
     // Fast child indexing: O(1) map lookup for direct old children by id
-    const oldDirectChildIdMap = new Map();
+    let oldDirectChildIdMap = null;
     for (let c = insertionPoint; c && c !== endPoint; c = c.nextSibling) {
       if (c.nodeType === 1 && c.getAttribute) {
         const id = c.getAttribute("id");
-        if (id) oldDirectChildIdMap.set(id, c);
+        if (id) {
+          if (!oldDirectChildIdMap) oldDirectChildIdMap = new Map();
+          oldDirectChildIdMap.set(id, c);
+        }
       }
     }
 
@@ -104,7 +71,7 @@ export var IdiomorphFast = (function () {
       let matchedNode = null;
 
       // 1. O(1) Direct ID lookup
-      if (newChild.nodeType === 1 && newChild.getAttribute) {
+      if (oldDirectChildIdMap && newChild.nodeType === 1 && newChild.getAttribute) {
         const newId = newChild.getAttribute("id");
         if (newId && oldDirectChildIdMap.has(newId)) {
           matchedNode = oldDirectChildIdMap.get(newId);
@@ -313,24 +280,23 @@ export var IdiomorphFast = (function () {
 
   function morphAttributes(oldNode, newNode, ctx) {
     if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
-      const oldAttrs = new Map();
-      if (oldNode.attributes) {
-        for (let i = 0; i < oldNode.attributes.length; i++) {
-          oldAttrs.set(oldNode.attributes[i].name, oldNode.attributes[i].value);
-        }
-      }
-      const newAttrs = new Set();
-      if (newNode.attributes) {
-        for (let i = 0; i < newNode.attributes.length; i++) {
-          const a = newNode.attributes[i];
-          newAttrs.add(a.name);
-          if (oldAttrs.get(a.name) !== a.value) {
+      const nAttrs = newNode.attributes;
+      if (nAttrs) {
+        for (let i = 0; i < nAttrs.length; i++) {
+          const a = nAttrs[i];
+          if (oldNode.getAttribute(a.name) !== a.value) {
             oldNode.setAttribute(a.name, a.value);
           }
         }
       }
-      for (const [k] of oldAttrs) {
-        if (!newAttrs.has(k)) oldNode.removeAttribute(k);
+      const oAttrs = oldNode.attributes;
+      if (oAttrs) {
+        for (let i = oAttrs.length - 1; i >= 0; i--) {
+          const name = oAttrs[i].name;
+          if (newNode.getAttribute && newNode.getAttribute(name) === null) {
+            oldNode.removeAttribute(name);
+          }
+        }
       }
     } else if (oldNode.nodeType === 3 && newNode.nodeType === 3) {
       if (oldNode.nodeValue !== newNode.nodeValue) {
