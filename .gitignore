@@ -6,3 +6,6 @@ test/scratch/scratch.html
 .DS_Store
 .vscode
 /coverage
+/emsdk
+.vs
+.agents
