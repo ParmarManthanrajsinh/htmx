@@ -49,7 +49,10 @@
     "url": "git+https://github.com/bigskysoftware/htmx.git"
   },
   "eslintConfig": {
-    "extends": ["standard", "plugin:mocha/recommended"],
+    "extends": [
+      "standard",
+      "plugin:mocha/recommended"
+    ],
     "rules": {
       "mocha/consistent-spacing-between-blocks": 0,
       "mocha/no-setup-in-describe": 0,
@@ -70,10 +73,13 @@
       "no-useless-call": 0,
       "no-useless-escape": 0,
       "no-unused-expressions": 0,
-      "no-restricted-properties": ["error", {
+      "no-restricted-properties": [
+        "error",
+        {
           "property": "substr",
           "message": "Use .slice or .substring instead of .substr"
-      }],
+        }
+      ],
       "space-before-function-paren": [
         "error",
         "never"
@@ -92,6 +98,7 @@
     "eslint-plugin-import": "^2.29.1",
     "eslint-plugin-mocha": "^10.5.0",
     "fs-extra": "^9.1.0",
+    "jsdom": "^29.1.1",
     "mocha": "^11.7.4",
     "mock-socket": "^9.3.1",
     "sinon": "^10.0.1",

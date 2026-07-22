@@ -1,192 +1,57 @@
-import { Idiomorph } from './idiomorph-original.js';
+import { JSDOM } from 'jsdom';
+import { Idiomorph } from './idiomorph-upstream.js';
 import { IdiomorphFast } from '../../ext/idiomorph-fast.js';
 
-function cloneMockTree(node) {
-  if (!node) return null;
-  const copy = {
-    nodeType: node.nodeType,
-    tagName: node.tagName,
-    attributes: node.attributes ? node.attributes.map(a => ({ name: a.name, value: a.value })) : [],
-    nodeValue: node.nodeValue || "",
-    firstChild: null,
-    nextSibling: null,
-    parentNode: null,
-    getAttribute(key) {
-      const a = this.attributes.find(x => x.name === key);
-      return a ? a.value : null;
-    },
-    setAttribute(key, val) {
-      const a = this.attributes.find(x => x.name === key);
-      if (a) a.value = val;
-      else this.attributes.push({ name: key, value: val });
-    },
-    removeAttribute(key) {
-      this.attributes = this.attributes.filter(x => x.name !== key);
-    },
-    removeChild(child) {
-      if (this.firstChild === child) {
-        this.firstChild = child.nextSibling;
-      } else {
-        let curr = this.firstChild;
-        while (curr && curr.nextSibling !== child) {
-          curr = curr.nextSibling;
-        }
-        if (curr) curr.nextSibling = child.nextSibling;
-      }
-      child.parentNode = null;
-    },
-    insertBefore(newChild, refChild) {
-      if (newChild.parentNode) {
-        newChild.parentNode.removeChild(newChild);
-      }
-      newChild.parentNode = this;
-      if (!refChild || this.firstChild === refChild) {
-        newChild.nextSibling = this.firstChild;
-        this.firstChild = newChild;
-      } else {
-        let curr = this.firstChild;
-        while (curr && curr.nextSibling !== refChild) {
-          curr = curr.nextSibling;
-        }
-        if (curr) {
-          newChild.nextSibling = curr.nextSibling;
-          curr.nextSibling = newChild;
-        } else {
-          this.appendChild(newChild);
-        }
-      }
-    },
-    appendChild(child) {
-      if (child.parentNode) {
-        child.parentNode.removeChild(child);
-      }
-      child.parentNode = this;
-      child.nextSibling = null;
-      if (!this.firstChild) {
-        this.firstChild = child;
-      } else {
-        let curr = this.firstChild;
-        while (curr.nextSibling) {
-          curr = curr.nextSibling;
-        }
-        curr.nextSibling = child;
-      }
-    }
-  };
-
-  let prevChild = null;
-  for (let c = node.firstChild; c; c = c.nextSibling) {
-    const childCopy = cloneMockTree(c);
-    childCopy.parentNode = copy;
-    if (!copy.firstChild) copy.firstChild = childCopy;
-    if (prevChild) prevChild.nextSibling = childCopy;
-    prevChild = childCopy;
+const { window } = new JSDOM();
+const { document } = window;
+for (const key of Object.getOwnPropertyNames(window)) {
+  if (key !== "global" && key !== "window" && key !== "document" && typeof global[key] === "undefined") {
+    try {
+      global[key] = window[key];
+    } catch(e) {}
   }
-  return copy;
+}
+global.window = window;
+global.document = document;
+
+function generateTreeHTML(shape, count) {
+  let html = '<ul>';
+  for (let i = 0; i < count; i++) {
+    let idAttr = (shape === "keyed" || shape === "reorder") ? `id="item-${i}"` : "";
+    html += `<li ${idAttr} class="cls-${i}">Item ${i}</li>`;
+  }
+  html += '</ul>';
+  return html;
 }
 
-function generateTree(shape, count) {
-  const children = [];
+function generateNewTreeHTML(shape, count) {
+  let html = '<ul>';
   for (let i = 0; i < count; i++) {
-    const attrs = [];
-    if (shape === "keyed" || shape === "reorder") {
-      attrs.push({ name: "id", value: `item-${i}` });
-    }
-    attrs.push({ name: "class", value: `cls-${i}` });
-
-    children.push({
-      nodeType: 1,
-      tagName: "LI",
-      attributes: attrs,
-      firstChild: { nodeType: 3, tagName: "#TEXT", nodeValue: `Item ${i} text`, firstChild: null, nextSibling: null, parentNode: null },
-      nextSibling: null,
-      parentNode: null,
-      getAttribute(k) {
-        const a = this.attributes.find(x => x.name === k);
-        return a ? a.value : null;
-      },
-      setAttribute(k, v) {
-        const a = this.attributes.find(x => x.name === k);
-        if (a) a.value = v; else this.attributes.push({ name: k, value: v });
-      },
-      removeAttribute(k) {
-        this.attributes = this.attributes.filter(x => x.name !== k);
-      }
-    });
+    let idAttr = (shape === "keyed" || shape === "reorder") ? `id="item-${i}"` : "";
+    html += `<li ${idAttr} class="cls-${i}-new" data-updated="true">Item ${i} - updated</li>`;
   }
+  html += '</ul>';
+  return html;
+}
 
-  if (shape === "reorder") {
-    children.reverse();
+function shuffleHTML(htmlStr) {
+  const div = document.createElement("div");
+  div.innerHTML = htmlStr;
+  const list = div.firstElementChild;
+  const items = Array.from(list.children);
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
   }
+  list.innerHTML = "";
+  items.forEach(item => list.appendChild(item));
+  return list.outerHTML;
+}
 
-  for (let i = 0; i < children.length - 1; i++) {
-    children[i].nextSibling = children[i + 1];
-  }
-
-  const root = {
-    nodeType: 1,
-    tagName: "UL",
-    attributes: [{ name: "id", value: "list" }],
-    firstChild: children[0],
-    nextSibling: null,
-    parentNode: null,
-    getAttribute(k) { return "list"; },
-    setAttribute() {},
-    removeAttribute() {},
-    removeChild(child) {
-      if (this.firstChild === child) {
-        this.firstChild = child.nextSibling;
-      } else {
-        let curr = this.firstChild;
-        while (curr && curr.nextSibling !== child) {
-          curr = curr.nextSibling;
-        }
-        if (curr) curr.nextSibling = child.nextSibling;
-      }
-      child.parentNode = null;
-    },
-    insertBefore(newChild, refChild) {
-      if (newChild.parentNode) {
-        newChild.parentNode.removeChild(newChild);
-      }
-      newChild.parentNode = this;
-      if (!refChild || this.firstChild === refChild) {
-        newChild.nextSibling = this.firstChild;
-        this.firstChild = newChild;
-      } else {
-        let curr = this.firstChild;
-        while (curr && curr.nextSibling !== refChild) {
-          curr = curr.nextSibling;
-        }
-        if (curr) {
-          newChild.nextSibling = curr.nextSibling;
-          curr.nextSibling = newChild;
-        } else {
-          this.appendChild(newChild);
-        }
-      }
-    },
-    appendChild(child) {
-      if (child.parentNode) {
-        child.parentNode.removeChild(child);
-      }
-      child.parentNode = this;
-      child.nextSibling = null;
-      if (!this.firstChild) {
-        this.firstChild = child;
-      } else {
-        let curr = this.firstChild;
-        while (curr.nextSibling) {
-          curr = curr.nextSibling;
-        }
-        curr.nextSibling = child;
-      }
-    }
-  };
-
-  for (const c of children) c.parentNode = root;
-
-  return root;
+function createDOM(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return div.firstElementChild;
 }
 
 function calcPercentile(arr, p) {
@@ -205,23 +70,26 @@ async function runBenchmark() {
   const shapes = ["keyed", "unkeyed", "reorder"];
   const warmupRuns = 5;
 
-  console.log("\n### Benchmark Results: Standard Idiomorph vs IdiomorphFast\n");
-  console.log("| Shape | Node Count | Standard Median | IdiomorphFast Median | **Speedup** | Standard p95 | Fast p95 |");
+  console.log("\n### Benchmark Results: Upstream Idiomorph vs IdiomorphFast (Real DOM)\n");
+  console.log("| Shape | Node Count | Upstream Median | IdiomorphFast Median | **Speedup** | Upstream p95 | Fast p95 |");
   console.log("|---|---|---|---|---|---|---|");
 
   for (const { label, count, runs: iterations } of sizes) {
     for (const shape of shapes) {
-      const oldTree = generateTree("keyed", count);
-      const newTree = generateTree(shape, count);
+      const oldHTML = generateTreeHTML(shape, count);
+      let newHTML = generateNewTreeHTML(shape, count);
+      if (shape === "reorder") {
+        newHTML = shuffleHTML(newHTML);
+      }
 
-      // 1. Standard Idiomorph Benchmark
+      // 1. Upstream Idiomorph Benchmark
       for (let i = 0; i < warmupRuns; i++) {
-        Idiomorph.morph(cloneMockTree(oldTree), cloneMockTree(newTree));
+        Idiomorph.morph(createDOM(oldHTML), createDOM(newHTML));
       }
       const origTimes = [];
       for (let i = 0; i < iterations; i++) {
-        const o = cloneMockTree(oldTree);
-        const n = cloneMockTree(newTree);
+        const o = createDOM(oldHTML);
+        const n = createDOM(newHTML);
         const t0 = performance.now();
         Idiomorph.morph(o, n);
         origTimes.push(performance.now() - t0);
@@ -229,12 +97,12 @@ async function runBenchmark() {
 
       // 2. IdiomorphFast Benchmark
       for (let i = 0; i < warmupRuns; i++) {
-        IdiomorphFast.morph(cloneMockTree(oldTree), cloneMockTree(newTree));
+        IdiomorphFast.morph(createDOM(oldHTML), createDOM(newHTML));
       }
       const fastTimes = [];
       for (let i = 0; i < iterations; i++) {
-        const o = cloneMockTree(oldTree);
-        const n = cloneMockTree(newTree);
+        const o = createDOM(oldHTML);
+        const n = createDOM(newHTML);
         const t0 = performance.now();
         IdiomorphFast.morph(o, n);
         fastTimes.push(performance.now() - t0);

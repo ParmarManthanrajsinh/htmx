@@ -1,164 +1,92 @@
 import assert from 'assert';
+import { JSDOM } from 'jsdom';
 import { IdiomorphFast } from '../../ext/idiomorph-fast.js';
 
-function createMockElement(tagName, attrs = {}, children = []) {
-  const node = {
-    nodeType: 1,
-    tagName: tagName.toUpperCase(),
-    attributes: Object.entries(attrs).map(([name, value]) => ({ name, value })),
-    getAttribute(key) {
-      const a = this.attributes.find(x => x.name === key);
-      return a ? a.value : null;
-    },
-    setAttribute(key, val) {
-      const a = this.attributes.find(x => x.name === key);
-      if (a) a.value = val;
-      else this.attributes.push({ name: key, value: val });
-    },
-    removeAttribute(key) {
-      this.attributes = this.attributes.filter(x => x.name !== key);
-    },
-    firstChild: null,
-    nextSibling: null,
-    parentNode: null,
-    ownerDocument: {
-      createElement(tag) { return createMockElement(tag); },
-      createTextNode(txt) { return createMockTextNode(txt); },
-      createComment(txt) { return { nodeType: 8, tagName: "#COMMENT", nodeValue: txt }; }
-    },
-    removeChild(child) {
-      if (this.firstChild === child) {
-        this.firstChild = child.nextSibling;
-      } else {
-        let curr = this.firstChild;
-        while (curr && curr.nextSibling !== child) {
-          curr = curr.nextSibling;
-        }
-        if (curr) curr.nextSibling = child.nextSibling;
-      }
-      child.parentNode = null;
-    },
-    insertBefore(newChild, refChild) {
-      if (newChild.parentNode) {
-        newChild.parentNode.removeChild(newChild);
-      }
-      newChild.parentNode = this;
-      if (!refChild || this.firstChild === refChild) {
-        newChild.nextSibling = this.firstChild;
-        this.firstChild = newChild;
-      } else {
-        let curr = this.firstChild;
-        while (curr && curr.nextSibling !== refChild) {
-          curr = curr.nextSibling;
-        }
-        if (curr) {
-          newChild.nextSibling = curr.nextSibling;
-          curr.nextSibling = newChild;
-        } else {
-          this.appendChild(newChild);
-        }
-      }
-    },
-    appendChild(child) {
-      if (child.parentNode) {
-        child.parentNode.removeChild(child);
-      }
-      child.parentNode = this;
-      child.nextSibling = null;
-      if (!this.firstChild) {
-        this.firstChild = child;
-      } else {
-        let curr = this.firstChild;
-        while (curr.nextSibling) {
-          curr = curr.nextSibling;
-        }
-        curr.nextSibling = child;
-      }
-    }
-  };
+const { document } = new JSDOM().window;
 
-  let prev = null;
-  for (const child of children) {
-    child.parentNode = node;
-    if (!node.firstChild) node.firstChild = child;
-    if (prev) prev.nextSibling = child;
-    prev = child;
-  }
-  return node;
+function createTestDOM(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html.trim();
+  return div.firstElementChild;
 }
 
-function createMockTextNode(text) {
-  return {
-    nodeType: 3,
-    tagName: "#TEXT",
-    nodeValue: text,
-    firstChild: null,
-    nextSibling: null,
-    parentNode: null
-  };
+// Test 1: Attributes sync
+{
+  const oldNode = createTestDOM(`<div class="a" data-old="1"></div>`);
+  const newNode = createTestDOM(`<div class="b" data-new="2"></div>`);
+  IdiomorphFast.morph(oldNode, newNode);
+  assert.strictEqual(oldNode.getAttribute("class"), "b");
+  assert.strictEqual(oldNode.getAttribute("data-new"), "2");
+  assert.strictEqual(oldNode.hasAttribute("data-old"), false);
 }
 
-async function testParity() {
-  // Test 1: Basic attribute and text update
-  const oldEl = createMockElement("div", { id: "box", class: "old" }, [
-    createMockElement("p", {}, [createMockTextNode("Old text")])
-  ]);
+// Test 2: Child Reordering (Same Parent Fast Path)
+{
+  const oldNode = createTestDOM(`
+    <ul id="list">
+      <li id="A">A</li>
+      <li id="B">B</li>
+      <li id="C">C</li>
+    </ul>
+  `);
+  
+  const originalA = oldNode.children[0];
+  const originalB = oldNode.children[1];
+  const originalC = oldNode.children[2];
 
-  const newEl = createMockElement("div", { id: "box", class: "new", title: "hover" }, [
-    createMockElement("p", {}, [createMockTextNode("New text")])
-  ]);
+  const newNode = createTestDOM(`
+    <ul id="list">
+      <li id="C">C</li>
+      <li id="A">A</li>
+      <li id="B">B</li>
+    </ul>
+  `);
 
-  IdiomorphFast.morph(oldEl, newEl);
+  IdiomorphFast.morph(oldNode, newNode);
 
-  assert.strictEqual(oldEl.getAttribute("class"), "new");
-  assert.strictEqual(oldEl.getAttribute("title"), "hover");
-  assert.strictEqual(oldEl.firstChild.firstChild.nodeValue, "New text");
+  assert.strictEqual(oldNode.children.length, 3);
+  assert.strictEqual(oldNode.children[0], originalC, "Object identity of C preserved");
+  assert.strictEqual(oldNode.children[1], originalA, "Object identity of A preserved");
+  assert.strictEqual(oldNode.children[2], originalB, "Object identity of B preserved");
+}
 
-  // Test 2: Keyed child reordering preserves DOM object identity
-  const childA = createMockElement("li", { id: "a" }, [createMockTextNode("Item A")]);
-  const childB = createMockElement("li", { id: "b" }, [createMockTextNode("Item B")]);
-  const childC = createMockElement("li", { id: "c" }, [createMockTextNode("Item C")]);
+// Test 3: Growth
+{
+  const oldNode = createTestDOM(`<div id="container"><span id="1">1</span></div>`);
+  const newNode = createTestDOM(`<div id="container"><span id="1">1</span><span id="2">2</span></div>`);
+  
+  const origSpan1 = oldNode.children[0];
+  IdiomorphFast.morph(oldNode, newNode);
+  
+  assert.strictEqual(oldNode.children.length, 2);
+  assert.strictEqual(oldNode.children[0], origSpan1, "Span 1 identity preserved");
+  assert.strictEqual(oldNode.children[1].getAttribute("id"), "2");
+}
 
-  const oldList = createMockElement("ul", { id: "list" }, [childA, childB, childC]);
+// Test 4: Regression test - 3-item real DOM list reorder without exception
+{
+  const oldList = createTestDOM(`
+    <ul id="test-list">
+      <li id="item-a">a</li>
+      <li id="item-b">b</li>
+      <li id="item-c">c</li>
+    </ul>
+  `);
 
-  const newList = createMockElement("ul", { id: "list" }, [
-    createMockElement("li", { id: "c" }, [createMockTextNode("Item C")]),
-    createMockElement("li", { id: "a" }, [createMockTextNode("Item A")]),
-    createMockElement("li", { id: "b" }, [createMockTextNode("Item B")])
-  ]);
+  const originalItems = Array.from(oldList.children);
+
+  const newList = createTestDOM(`
+    <ul id="test-list">
+      <li id="item-b">b</li>
+      <li id="item-a">a</li>
+    </ul>
+  `);
 
   IdiomorphFast.morph(oldList, newList);
-
-  // Assert reordered order is c, a, b
-  const first = oldList.firstChild;
-  const second = first ? first.nextSibling : null;
-  const third = second ? second.nextSibling : null;
-
-  assert.strictEqual(first.getAttribute("id"), "c");
-  assert.strictEqual(second.getAttribute("id"), "a");
-  assert.strictEqual(third.getAttribute("id"), "b");
-
-  // Assert node object identity was preserved!
-  assert.strictEqual(second, childA, "Original element reference for id='a' preserved");
-  assert.strictEqual(third, childB, "Original element reference for id='b' preserved");
-  assert.strictEqual(first, childC, "Original element reference for id='c' preserved");
-
-  // Test 3: List growth
-  const growOld = createMockElement("div", { id: "container" }, [
-    createMockElement("span", { id: "s1" }, [createMockTextNode("First")])
-  ]);
-  const growNew = createMockElement("div", { id: "container" }, [
-    createMockElement("span", { id: "s1" }, [createMockTextNode("First")]),
-    createMockElement("span", { id: "s2" }, [createMockTextNode("Second")])
-  ]);
-
-  IdiomorphFast.morph(growOld, growNew);
-  assert.strictEqual(growOld.firstChild.nextSibling.getAttribute("id"), "s2");
-
-  console.log("IdiomorphFast unit & parity tests passed!");
+  
+  assert.strictEqual(oldList.children.length, 2);
+  assert.strictEqual(oldList.children[0], originalItems[1], "b should be first");
+  assert.strictEqual(oldList.children[1], originalItems[0], "a should be second");
 }
 
-testParity().catch(err => {
-  console.error("Parity test failed:", err);
-  process.exit(1);
-});
+console.log("IdiomorphFast real-DOM unit & parity tests passed!");

@@ -25,17 +25,11 @@ export var IdiomorphFast = (function () {
 
   function createMorphContext(oldNode, newContent, config) {
     const mergedConfig = Object.assign({}, defaults, config);
-    const doc = oldNode.ownerDocument || (typeof document !== 'undefined' ? document : null);
-    const pantry = (doc && doc.createElement) ? doc.createElement("div") : { firstChild: null, appendChild() {} };
-
     return {
       target: oldNode,
       newContent,
       config: mergedConfig,
-      idMap: new Map(),
-      persistentIds: new Set(),
-      callbacks: mergedConfig.callbacks,
-      pantry
+      callbacks: mergedConfig.callbacks
     };
   }
 
@@ -99,19 +93,6 @@ export var IdiomorphFast = (function () {
         continue;
       }
 
-      // 3. Persistent ID lookups in full tree
-      if (newChild.nodeType === 1) {
-        const newChildId = newChild.getAttribute("id");
-        if (newChildId && ctx.persistentIds.has(newChildId)) {
-          const movedChild = moveBeforeById(oldParent, newChildId, insertionPoint, ctx);
-          if (movedChild) {
-            morphNode(movedChild, newChild, ctx);
-            insertionPoint = movedChild.nextSibling;
-            continue;
-          }
-        }
-      }
-
       // 4. Create / Clone new node
       const insertedNode = createNode(oldParent, newChild, insertionPoint, ctx);
       if (insertedNode) {
@@ -131,11 +112,7 @@ export var IdiomorphFast = (function () {
     const doc = oldParent.ownerDocument || (typeof document !== 'undefined' ? document : null);
     let newClonedChild;
     if (doc && doc.importNode) {
-      try {
-        newClonedChild = doc.importNode(newChild, true);
-      } catch (e) {
-        newClonedChild = cloneMockTree(newChild);
-      }
+      newClonedChild = doc.importNode(newChild, true);
     } else {
       newClonedChild = cloneMockTree(newChild);
     }
@@ -178,13 +155,9 @@ export var IdiomorphFast = (function () {
   }
 
   function removeNode(ctx, node) {
-    if (ctx.idMap.has(node)) {
-      moveBefore(ctx.pantry, node, null);
-    } else {
-      if (ctx.callbacks.beforeNodeRemoved(node) === false) return;
-      if (node.parentNode) node.parentNode.removeChild(node);
-      ctx.callbacks.afterNodeRemoved(node);
-    }
+    if (ctx.callbacks.beforeNodeRemoved(node) === false) return;
+    if (node.parentNode) node.parentNode.removeChild(node);
+    ctx.callbacks.afterNodeRemoved(node);
   }
 
   function removeNodesBetween(ctx, startInclusive, endExclusive) {
@@ -197,75 +170,17 @@ export var IdiomorphFast = (function () {
     return cursor;
   }
 
-  function moveBeforeById(parentNode, id, after, ctx) {
-    function findById(node, targetId) {
-      if (!node) return null;
-      if (node.getAttribute && node.getAttribute("id") === targetId) return node;
-      for (let c = node.firstChild; c; c = c.nextSibling) {
-        const found = findById(c, targetId);
-        if (found) return found;
-      }
-      return null;
-    }
-    const target = findById(ctx.target, id) || findById(ctx.pantry, id);
-    if (target) {
-      removeElementFromAncestorsIdMaps(target, ctx);
-      moveBefore(parentNode, target, after);
-    }
-    return target;
-  }
-
-  function removeElementFromAncestorsIdMaps(element, ctx) {
-    const id = element.getAttribute ? element.getAttribute("id") : null;
-    if (!id) return;
-    let curr = element.parentNode;
-    while (curr) {
-      let idSet = ctx.idMap.get(curr);
-      if (idSet) {
-        idSet.delete(id);
-        if (!idSet.size) ctx.idMap.delete(curr);
-      }
-      curr = curr.parentNode;
-    }
-  }
-
   function moveBefore(parentNode, element, after) {
     if (element === after) return;
-    if (element.parentNode && element.parentNode.removeChild) {
-      element.parentNode.removeChild(element);
-    }
-    element.parentNode = parentNode;
-    element.nextSibling = null;
-
     if (after) {
-      if (parentNode.firstChild === after) {
-        element.nextSibling = parentNode.firstChild;
-        parentNode.firstChild = element;
-      } else {
-        let prev = parentNode.firstChild;
-        while (prev && prev.nextSibling !== after) {
-          prev = prev.nextSibling;
-        }
-        if (prev) {
-          element.nextSibling = after;
-          prev.nextSibling = element;
-        } else {
-          append(parentNode, element);
-        }
-      }
+      parentNode.insertBefore(element, after);
     } else {
-      append(parentNode, element);
+      parentNode.appendChild(element);
     }
   }
 
   function append(parentNode, element) {
-    if (!parentNode.firstChild) {
-      parentNode.firstChild = element;
-    } else {
-      let last = parentNode.firstChild;
-      while (last.nextSibling) last = last.nextSibling;
-      last.nextSibling = element;
-    }
+    parentNode.appendChild(element);
   }
 
   function morphNode(oldNode, newContent, ctx) {
