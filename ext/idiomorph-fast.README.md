@@ -4,13 +4,15 @@
 
 ## Scope & Capabilities
 
-This extension provides high-performance, full-parity DOM morphing while optimizing common rendering paths.
-
 **Features:**
-- **Cross-Parent Persistent ID Relocation**: Full feature parity with upstream Idiomorph. Nodes with matching unique `id`s are preserved and relocated anywhere across the DOM tree across parents while maintaining live element object identity.
-- **O(1) Direct Child Map Indexing**: Fast-path local child lookup to eliminate $O(N^2)$ scan overhead during morphing.
+- **HTML String Input**: Accepts raw HTML strings as `newContent` (the standard htmx calling convention), parsing via `<template>` for correct handling of partial HTML fragments.
+- **Cross-Parent Persistent ID Relocation**: Nodes with matching unique `id`s are preserved and relocated anywhere across the DOM tree while maintaining live element object identity.
+- **O(1) Direct Child Map Indexing**: Fast-path local child lookup to eliminate O(N²) scan overhead during morphing.
 - **Positional & Text Node Matching**: Fallback positional matching for unkeyed nodes.
 - **Attribute Diffing**: Direct attribute diffing with zero GC allocation overhead.
+
+**Limitations:**
+- Does not sync live `.value`/`.checked`/`.selected` DOM properties on form elements the way upstream idiomorph's `syncInputValue` does — only HTML attributes are diffed. Form elements with user-modified live state may not reflect server-sent changes correctly.
 
 ## Real-DOM Verification
 

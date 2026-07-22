@@ -113,4 +113,20 @@ function createTestDOM(html) {
   assert.strictEqual(oldNode.querySelector('#a').children.length, 0);
 }
 
+// Test 6: Raw HTML string input (the actual real-world calling convention)
+{
+  const oldNode = createTestDOM(`<div id="box" class="old"></div>`);
+  IdiomorphFast.morph(oldNode, '<div id="box" class="new" data-x="1"></div>');
+  assert.strictEqual(oldNode.getAttribute("class"), "new");
+  assert.strictEqual(oldNode.getAttribute("data-x"), "1");
+}
+
+// Test 7: Multi-root HTML fragment string (e.g. several <li> siblings)
+{
+  const oldNode = createTestDOM(`<ul id="list"><li id="a">A</li></ul>`);
+  IdiomorphFast.morph(oldNode, '<ul id="list"><li id="a">A</li><li id="b">B</li></ul>');
+  assert.strictEqual(oldNode.children.length, 2);
+  assert.strictEqual(oldNode.children[1].getAttribute("id"), "b");
+}
+
 console.log("IdiomorphFast real-DOM unit & parity tests passed!");

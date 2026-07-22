@@ -17,10 +17,34 @@ export var IdiomorphFast = (function () {
     },
   };
 
-  function normalizeParent(elt) {
+  function normalizeParent(elt, doc) {
     if (elt == null) return null;
+    if (typeof elt === "string") {
+      return parseContent(elt, doc);
+    }
     if (elt.nodeType === 1 || elt.nodeType === 11 || elt.nodeType === 9) return elt;
     return null;
+  }
+
+  function parseContent(html, doc) {
+    doc = doc || (typeof document !== "undefined" ? document : null);
+    if (!doc) return null;
+    // wrap in <template> so partial HTML (e.g. <tr>, <li>) parses correctly,
+    // matching upstream idiomorph's approach
+    const template = doc.createElement("template");
+    template.innerHTML = html.trim();
+    const fragment = template.content;
+    // single root element: morph against it directly
+    if (fragment.childNodes.length === 1 && fragment.firstChild.nodeType === 1) {
+      return fragment.firstChild;
+    }
+    // multiple root nodes: wrap in dummy parent so morphChildren has a
+    // single newParent to iterate
+    const dummyParent = doc.createElement("div");
+    while (fragment.firstChild) {
+      dummyParent.appendChild(fragment.firstChild);
+    }
+    return dummyParent;
   }
 
   function collectElementsWithId(root, map) {
@@ -105,8 +129,10 @@ export var IdiomorphFast = (function () {
 
   function morph(oldNode, newContent, config = {}) {
     oldNode = normalizeParent(oldNode);
-    const newNode = normalizeParent(newContent);
-    if (!oldNode || !newNode) return;
+    if (!oldNode) return;
+    const doc = oldNode.ownerDocument || (typeof document !== "undefined" ? document : null);
+    const newNode = normalizeParent(newContent, doc);
+    if (!newNode) return;
     const ctx = createMorphContext(oldNode, newNode, config);
     if (ctx.config.morphStyle === "innerHTML") {
       morphChildren(ctx, oldNode, newNode);
