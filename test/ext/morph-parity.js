@@ -89,4 +89,28 @@ function createTestDOM(html) {
   assert.strictEqual(oldList.children[1], originalItems[0], "a should be second");
 }
 
+// Test 5: Cross-Parent Persistent ID Node Relocation
+{
+  const oldNode = createTestDOM(`
+    <div id="root">
+      <ul id="a"><li id="x">X</li></ul>
+      <ul id="b"></ul>
+    </div>
+  `);
+  const originalX = oldNode.querySelector('#x');
+
+  const newNode = createTestDOM(`
+    <div id="root">
+      <ul id="a"></ul>
+      <ul id="b"><li id="x">X</li></ul>
+    </div>
+  `);
+
+  IdiomorphFast.morph(oldNode, newNode);
+
+  assert.strictEqual(oldNode.querySelector('#b').children[0], originalX,
+    "node x moved to new parent, same object identity preserved");
+  assert.strictEqual(oldNode.querySelector('#a').children.length, 0);
+}
+
 console.log("IdiomorphFast real-DOM unit & parity tests passed!");

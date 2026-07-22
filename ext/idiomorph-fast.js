@@ -23,12 +23,82 @@ export var IdiomorphFast = (function () {
     return null;
   }
 
+  function collectElementsWithId(root, map) {
+    if (!root) return;
+    if (root.nodeType === 1 && root.getAttribute) {
+      const id = root.getAttribute("id");
+      if (id) {
+        const existing = map.get(id);
+        if (existing) {
+          existing.count++;
+        } else {
+          map.set(id, { count: 1, tagName: root.tagName });
+        }
+      }
+    }
+    if (root.querySelectorAll) {
+      const elts = root.querySelectorAll("[id]");
+      for (let i = 0; i < elts.length; i++) {
+        const elt = elts[i];
+        const id = elt.getAttribute("id");
+        if (id) {
+          const existing = map.get(id);
+          if (existing) {
+            existing.count++;
+          } else {
+            map.set(id, { count: 1, tagName: elt.tagName });
+          }
+        }
+      }
+    } else {
+      for (let c = root.firstChild; c; c = c.nextSibling) {
+        collectElementsWithId(c, map);
+      }
+    }
+  }
+
+  function createPersistentIds(oldNode, newNode) {
+    const oldMap = new Map();
+    const newMap = new Map();
+    collectElementsWithId(oldNode, oldMap);
+    collectElementsWithId(newNode, newMap);
+
+    const persistentIds = new Set();
+    for (const [id, oldInfo] of oldMap.entries()) {
+      if (oldInfo.count === 1) {
+        const newInfo = newMap.get(id);
+        if (newInfo && newInfo.count === 1 && newInfo.tagName === oldInfo.tagName) {
+          persistentIds.add(id);
+        }
+      }
+    }
+    return persistentIds;
+  }
+
+  function findElementById(root, id) {
+    if (root.getAttribute && root.getAttribute("id") === id) return root;
+    if (root.querySelector) {
+      try {
+        const found = root.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
+        if (found) return found;
+      } catch (e) {}
+    }
+    for (let c = root.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 1) {
+        const found = findElementById(c, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
   function createMorphContext(oldNode, newContent, config) {
     const mergedConfig = Object.assign({}, defaults, config);
     return {
       target: oldNode,
       newContent,
       config: mergedConfig,
+      persistentIds: createPersistentIds(oldNode, newContent),
       callbacks: mergedConfig.callbacks
     };
   }
@@ -84,6 +154,17 @@ export var IdiomorphFast = (function () {
         }
       }
 
+      // 3. Tree-wide persistent ID lookup
+      if (!matchedNode && newChild.nodeType === 1 && newChild.getAttribute) {
+        const newId = newChild.getAttribute("id");
+        if (newId && ctx.persistentIds.has(newId)) {
+          const found = findElementById(ctx.target, newId);
+          if (found && found.tagName === newChild.tagName) {
+            matchedNode = found;
+          }
+        }
+      }
+
       if (matchedNode) {
         if (matchedNode !== insertionPoint) {
           moveBefore(oldParent, matchedNode, insertionPoint);
@@ -103,6 +184,12 @@ export var IdiomorphFast = (function () {
     while (insertionPoint && insertionPoint !== endPoint) {
       const tempNode = insertionPoint;
       insertionPoint = insertionPoint.nextSibling;
+      if (tempNode.nodeType === 1 && tempNode.getAttribute) {
+        const id = tempNode.getAttribute("id");
+        if (id && ctx.persistentIds.has(id)) {
+          continue;
+        }
+      }
       removeNode(ctx, tempNode);
     }
   }
