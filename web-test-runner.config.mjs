@@ -59,7 +59,8 @@ const config = {
   },
   files: [
     'test/attributes/**/*.js',
-    'test/core/**/*.js'
+    'test/core/**/*.js',
+    'test/ext/**/*.js'
   ],
   reporters: [summaryReporter({ flatten: false, reportTestLogs: false, reportTestErrors: true }), defaultReporter({ reportTestProgress: true, reportTestResults: true })]
 }
