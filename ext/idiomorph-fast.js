@@ -39,8 +39,9 @@ export var IdiomorphFast = (function () {
       return fragment.firstChild;
     }
     // multiple root nodes: wrap in dummy parent so morphChildren has a
-    // single newParent to iterate
+    // single newParent to iterate; tag it so morph() can detect this case
     const dummyParent = doc.createElement("div");
+    dummyParent._idfMultiRoot = true;
     while (fragment.firstChild) {
       dummyParent.appendChild(fragment.firstChild);
     }
@@ -136,6 +137,19 @@ export var IdiomorphFast = (function () {
     const ctx = createMorphContext(oldNode, newNode, config);
     if (ctx.config.morphStyle === "innerHTML") {
       morphChildren(ctx, oldNode, newNode);
+    } else if (newNode._idfMultiRoot) {
+      // Multi-root fragment + outerHTML: splice new children into oldNode's
+      // parent in place of oldNode, like idiomorph's morphOuterHTML does.
+      // Uses morphChildren with oldNode as insertionPoint and
+      // oldNode.nextSibling as endPoint so oldNode gets replaced in-place
+      // by however many new root nodes the fragment contains.
+      if (oldNode.parentNode) {
+        morphChildren(ctx, oldNode.parentNode, newNode, oldNode, oldNode.nextSibling);
+      } else {
+        // Detached root with no parent: fall back to innerHTML-style morph
+        // into oldNode itself, since there's no parent to splice into.
+        morphChildren(ctx, oldNode, newNode);
+      }
     } else {
       morphNode(oldNode, newNode, ctx);
     }

@@ -129,4 +129,15 @@ function createTestDOM(html) {
   assert.strictEqual(oldNode.children[1].getAttribute("id"), "b");
 }
 
+// Test 8: Multi-root HTML string + outerHTML splices into parent, not nests
+{
+  const parent = createTestDOM(`<section><div id="box" class="old"></div></section>`);
+  const originalBox = parent.querySelector('#box');
+  IdiomorphFast.morph(originalBox, '<div id="box" class="old"></div><div id="extra"></div>');
+  assert.strictEqual(parent.children.length, 2, "parent should have 2 children after multi-root splice");
+  assert.strictEqual(parent.children[0], originalBox, "box should be same object identity");
+  assert.strictEqual(parent.children[0].getAttribute("id"), "box");
+  assert.strictEqual(parent.children[1].getAttribute("id"), "extra");
+}
+
 console.log("IdiomorphFast real-DOM unit & parity tests passed!");
