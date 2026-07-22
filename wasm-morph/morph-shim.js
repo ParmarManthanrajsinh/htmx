@@ -22,7 +22,7 @@ export async function initWasmMorph() {
   return initPromise;
 }
 
-export function encodeTree(rootEl) {
+export function encodeTreeToHeap(rootEl, mod) {
   const nodes = [];
   const attrs = [];
   const strings = [];
@@ -92,15 +92,113 @@ export function encodeTree(rootEl) {
 
   traverse(rootEl);
 
+  const encoder = new TextEncoder();
+  const stringRecords = [];
+  let totalStringBytes = 0;
+  const stringBuffers = [];
+
+  for (let i = 0; i < strings.length; i++) {
+    const bytes = encoder.encode(strings[i]);
+    stringRecords.push(totalStringBytes, bytes.length);
+    stringBuffers.push(bytes);
+    totalStringBytes += bytes.length;
+  }
+
+  const nodesCount = nodes.length / 5;
+  const attrsCount = attrs.length / 2;
+  const stringsCount = strings.length;
+
+  const headerByteLen = 16;
+  const nodesByteLen = nodes.length * 4;
+  const attrsByteLen = attrs.length * 4;
+  const stringRecsByteLen = stringRecords.length * 4;
+
+  const totalByteLen = headerByteLen + nodesByteLen + attrsByteLen + stringRecsByteLen + totalStringBytes;
+  const paddedByteLen = (totalByteLen + 3) & ~3;
+
+  const buffer = new ArrayBuffer(paddedByteLen);
+  const u32View = new Uint32Array(buffer);
+  const i32View = new Int32Array(buffer);
+  const u8View = new Uint8Array(buffer);
+
+  // Header
+  u32View[0] = nodesCount;
+  u32View[1] = attrsCount;
+  u32View[2] = stringsCount;
+  u32View[3] = totalStringBytes;
+
+  // Nodes
+  for (let i = 0; i < nodes.length; i++) {
+    i32View[4 + i] = nodes[i];
+  }
+
+  // Attrs
+  const attrsStartU32 = 4 + nodes.length;
+  for (let i = 0; i < attrs.length; i++) {
+    u32View[attrsStartU32 + i] = attrs[i];
+  }
+
+  // String Records
+  const stringRecsStartU32 = attrsStartU32 + attrs.length;
+  for (let i = 0; i < stringRecords.length; i++) {
+    u32View[stringRecsStartU32 + i] = stringRecords[i];
+  }
+
+  // String Bytes
+  let strBytesStartU8 = (stringRecsStartU32 + stringRecords.length) * 4;
+  for (let i = 0; i < stringBuffers.length; i++) {
+    u8View.set(stringBuffers[i], strBytesStartU8);
+    strBytesStartU8 += stringBuffers[i].length;
+  }
+
+  // Allocate WASM Heap buffer
+  const ptr = mod._malloc(paddedByteLen);
+  mod.HEAPU8.set(u8View, ptr);
+
   return {
-    nodes,
-    attrs,
-    strings
+    ptr,
+    len: paddedByteLen,
+    raw: {
+      nodes,
+      attrs,
+      strings
+    }
   };
 }
 
-export function applyPatches(rootEl, patches, newStrings) {
-  // Map index to node in DOM
+export function buildDOMSubtree(newTreeRaw, nodeIdx, doc = document) {
+  const { nodes, attrs, strings } = newTreeRaw;
+  const tagId = nodes[nodeIdx * 5];
+  const attrsOffset = nodes[nodeIdx * 5 + 1];
+  const attrsCount = nodes[nodeIdx * 5 + 2];
+  const firstChild = nodes[nodeIdx * 5 + 3];
+
+  const tagName = strings[tagId];
+  let el;
+
+  if (tagName === "#text") {
+    let textVal = "";
+    if (attrsCount > 0) {
+      textVal = strings[attrs[attrsOffset * 2 + 1]] || "";
+    }
+    return doc.createTextNode(textVal);
+  } else if (tagName === "#comment") {
+    return doc.createComment("");
+  } else {
+    el = doc.createElement(tagName);
+    for (let i = 0; i < attrsCount; i++) {
+      const key = strings[attrs[(attrsOffset + i) * 2]];
+      const val = strings[attrs[(attrsOffset + i) * 2 + 1]];
+      el.setAttribute(key, val);
+    }
+    for (let childIdx = firstChild; childIdx !== -1; childIdx = nodes[childIdx * 5 + 4]) {
+      el.appendChild(buildDOMSubtree(newTreeRaw, childIdx, doc));
+    }
+    return el;
+  }
+}
+
+export function applyPatches(rootEl, patches, newTreeRaw) {
   const nodeList = [];
   function mapNodes(node) {
     nodeList.push(node);
@@ -110,32 +208,56 @@ export function applyPatches(rootEl, patches, newStrings) {
   }
   mapNodes(rootEl);
 
+  const doc = rootEl.ownerDocument || document;
+
   for (let i = 0; i < patches.length; i++) {
     const patch = patches[i];
     const targetNode = nodeList[patch.target_idx];
-    if (!targetNode) continue;
 
     switch (patch.kind) {
       case 0: // SetAttr
-        if (targetNode.nodeType === 1) {
-          const key = newStrings[patch.key_id];
-          const val = newStrings[patch.val_id];
+        if (targetNode && targetNode.nodeType === 1) {
+          const key = newTreeRaw.strings[patch.key_id];
+          const val = newTreeRaw.strings[patch.val_id];
           targetNode.setAttribute(key, val);
         }
         break;
       case 1: // RemoveAttr
-        if (targetNode.nodeType === 1) {
-          const key = newStrings[patch.key_id];
+        if (targetNode && targetNode.nodeType === 1) {
+          const key = newTreeRaw.strings[patch.key_id];
           targetNode.removeAttribute(key);
         }
         break;
       case 2: // UpdateText
-        if (targetNode.nodeType === 3) {
-          targetNode.nodeValue = newStrings[patch.val_id];
+        if (targetNode && targetNode.nodeType === 3) {
+          targetNode.nodeValue = newTreeRaw.strings[patch.val_id];
         }
         break;
+      case 3: { // MoveNode
+        const parentNode = nodeList[patch.parent_idx];
+        const siblingNode = patch.sibling_idx >= 0 ? nodeList[patch.sibling_idx] : null;
+        if (targetNode && parentNode) {
+          if (siblingNode && siblingNode.parentNode === parentNode) {
+            parentNode.insertBefore(targetNode, siblingNode);
+          } else {
+            parentNode.appendChild(targetNode);
+          }
+        }
+        break;
+      }
+      case 4: { // InsertNode
+        const parentNode = nodeList[patch.parent_idx] || rootEl;
+        const siblingNode = patch.sibling_idx >= 0 ? nodeList[patch.sibling_idx] : null;
+        const newDOMNode = buildDOMSubtree(newTreeRaw, patch.target_idx, doc);
+        if (siblingNode && siblingNode.parentNode === parentNode) {
+          parentNode.insertBefore(newDOMNode, siblingNode);
+        } else {
+          parentNode.appendChild(newDOMNode);
+        }
+        break;
+      }
       case 5: // RemoveNode
-        if (targetNode.parentNode) {
+        if (targetNode && targetNode.parentNode) {
           targetNode.parentNode.removeChild(targetNode);
         }
         break;
@@ -144,23 +266,53 @@ export function applyPatches(rootEl, patches, newStrings) {
 }
 
 export async function morph(oldEl, newEl, fallbackJsMorph) {
-  const mod = await initWasmMorph();
-  if (!mod || initFailed) {
+  let mod;
+  try {
+    mod = await initWasmMorph();
+    if (!mod || initFailed) {
+      if (typeof fallbackJsMorph === 'function') {
+        return fallbackJsMorph(oldEl, newEl);
+      }
+      return;
+    }
+
+    const encodedOld = encodeTreeToHeap(oldEl, mod);
+    const encodedNew = encodeTreeToHeap(newEl, mod);
+
+    const patchRes = mod.compute_morph_patch(
+      encodedOld.ptr, encodedOld.len,
+      encodedNew.ptr, encodedNew.len
+    );
+
+    const patchPtr = patchRes.ptr;
+    const patchCount = patchRes.count;
+    const patches = [];
+
+    if (patchPtr && patchCount > 0) {
+      const heapBuf = mod.HEAPU8.buffer;
+      const patchU32View = new Uint32Array(heapBuf, patchPtr, patchCount * 6);
+      const patchI32View = new Int32Array(heapBuf, patchPtr, patchCount * 6);
+      for (let i = 0; i < patchCount; i++) {
+        const offset = i * 6;
+        patches.push({
+          kind: patchU32View[offset],
+          target_idx: patchU32View[offset + 1],
+          parent_idx: patchU32View[offset + 2],
+          sibling_idx: patchI32View[offset + 3],
+          key_id: patchU32View[offset + 4],
+          val_id: patchU32View[offset + 5]
+        });
+      }
+    }
+
+    mod._free(encodedOld.ptr);
+    mod._free(encodedNew.ptr);
+
+    applyPatches(oldEl, patches, encodedNew.raw);
+  } catch (err) {
     if (typeof fallbackJsMorph === 'function') {
       return fallbackJsMorph(oldEl, newEl);
     }
-    return;
   }
-
-  const encodedOld = encodeTree(oldEl);
-  const encodedNew = encodeTree(newEl);
-  const patches = mod.compute_diff(encodedOld, encodedNew);
-  applyPatches(oldEl, patches, encodedNew.strings);
 }
 
-export async function testRoundtrip(rootEl) {
-  const mod = await initWasmMorph();
-  if (!mod) return null;
-  const encoded = encodeTree(rootEl);
-  return mod.roundtrip_test(encoded);
-}

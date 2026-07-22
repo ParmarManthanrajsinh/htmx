@@ -21,6 +21,11 @@ function createMockElement(tagName, attrs = {}, children = []) {
     firstChild: null,
     nextSibling: null,
     parentNode: null,
+    ownerDocument: {
+      createElement(tag) { return createMockElement(tag); },
+      createTextNode(txt) { return createMockTextNode(txt); },
+      createComment(txt) { return { nodeType: 8, tagName: "#COMMENT", nodeValue: txt }; }
+    },
     removeChild(child) {
       if (this.firstChild === child) {
         this.firstChild = child.nextSibling;
@@ -32,6 +37,43 @@ function createMockElement(tagName, attrs = {}, children = []) {
         if (curr) curr.nextSibling = child.nextSibling;
       }
       child.parentNode = null;
+    },
+    insertBefore(newChild, refChild) {
+      if (newChild.parentNode) {
+        newChild.parentNode.removeChild(newChild);
+      }
+      newChild.parentNode = this;
+      if (!refChild || this.firstChild === refChild) {
+        newChild.nextSibling = this.firstChild;
+        this.firstChild = newChild;
+      } else {
+        let curr = this.firstChild;
+        while (curr && curr.nextSibling !== refChild) {
+          curr = curr.nextSibling;
+        }
+        if (curr) {
+          newChild.nextSibling = curr.nextSibling;
+          curr.nextSibling = newChild;
+        } else {
+          this.appendChild(newChild);
+        }
+      }
+    },
+    appendChild(child) {
+      if (child.parentNode) {
+        child.parentNode.removeChild(child);
+      }
+      child.parentNode = this;
+      child.nextSibling = null;
+      if (!this.firstChild) {
+        this.firstChild = child;
+      } else {
+        let curr = this.firstChild;
+        while (curr.nextSibling) {
+          curr = curr.nextSibling;
+        }
+        curr.nextSibling = child;
+      }
     }
   };
 
@@ -57,6 +99,7 @@ function createMockTextNode(text) {
 }
 
 async function testParity() {
+  // Test 1: Basic attribute and text update
   const oldEl = createMockElement("div", { id: "box", class: "old" }, [
     createMockElement("p", {}, [createMockTextNode("Old text")])
   ]);
@@ -71,7 +114,48 @@ async function testParity() {
   assert.strictEqual(oldEl.getAttribute("title"), "hover");
   assert.strictEqual(oldEl.firstChild.firstChild.nodeValue, "New text");
 
-  console.log("Parity test passed!");
+  // Test 2: Keyed child reordering preserves DOM object identity
+  const childA = createMockElement("li", { id: "a" }, [createMockTextNode("Item A")]);
+  const childB = createMockElement("li", { id: "b" }, [createMockTextNode("Item B")]);
+  const childC = createMockElement("li", { id: "c" }, [createMockTextNode("Item C")]);
+
+  const oldList = createMockElement("ul", { id: "list" }, [childA, childB, childC]);
+
+  const newList = createMockElement("ul", { id: "list" }, [
+    createMockElement("li", { id: "c" }, [createMockTextNode("Item C")]),
+    createMockElement("li", { id: "a" }, [createMockTextNode("Item A")]),
+    createMockElement("li", { id: "b" }, [createMockTextNode("Item B")])
+  ]);
+
+  await morph(oldList, newList);
+
+  // Assert reordered order is c, a, b
+  const first = oldList.firstChild;
+  const second = first ? first.nextSibling : null;
+  const third = second ? second.nextSibling : null;
+
+  assert.strictEqual(first.getAttribute("id"), "c");
+  assert.strictEqual(second.getAttribute("id"), "a");
+  assert.strictEqual(third.getAttribute("id"), "b");
+
+  // Assert node object identity was preserved!
+  assert.strictEqual(second, childA, "Original element reference for id='a' preserved");
+  assert.strictEqual(third, childB, "Original element reference for id='b' preserved");
+  assert.strictEqual(first, childC, "Original element reference for id='c' preserved");
+
+  // Test 3: List growth (InsertNode)
+  const growOld = createMockElement("div", { id: "container" }, [
+    createMockElement("span", { id: "s1" }, [createMockTextNode("First")])
+  ]);
+  const growNew = createMockElement("div", { id: "container" }, [
+    createMockElement("span", { id: "s1" }, [createMockTextNode("First")]),
+    createMockElement("span", { id: "s2" }, [createMockTextNode("Second")])
+  ]);
+
+  await morph(growOld, growNew);
+  assert.strictEqual(growOld.firstChild.nextSibling.getAttribute("id"), "s2");
+
+  console.log("Parity & Keyed Identity tests passed!");
 }
 
 testParity().catch(err => {
