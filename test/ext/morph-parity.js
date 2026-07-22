@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { morph } from '../../wasm-morph/morph-shim.js';
+import { IdiomorphFast } from '../../ext/idiomorph-fast.js';
 
 function createMockElement(tagName, attrs = {}, children = []) {
   const node = {
@@ -108,7 +108,7 @@ async function testParity() {
     createMockElement("p", {}, [createMockTextNode("New text")])
   ]);
 
-  await morph(oldEl, newEl);
+  IdiomorphFast.morph(oldEl, newEl);
 
   assert.strictEqual(oldEl.getAttribute("class"), "new");
   assert.strictEqual(oldEl.getAttribute("title"), "hover");
@@ -127,7 +127,7 @@ async function testParity() {
     createMockElement("li", { id: "b" }, [createMockTextNode("Item B")])
   ]);
 
-  await morph(oldList, newList);
+  IdiomorphFast.morph(oldList, newList);
 
   // Assert reordered order is c, a, b
   const first = oldList.firstChild;
@@ -143,7 +143,7 @@ async function testParity() {
   assert.strictEqual(third, childB, "Original element reference for id='b' preserved");
   assert.strictEqual(first, childC, "Original element reference for id='c' preserved");
 
-  // Test 3: List growth (InsertNode)
+  // Test 3: List growth
   const growOld = createMockElement("div", { id: "container" }, [
     createMockElement("span", { id: "s1" }, [createMockTextNode("First")])
   ]);
@@ -152,10 +152,10 @@ async function testParity() {
     createMockElement("span", { id: "s2" }, [createMockTextNode("Second")])
   ]);
 
-  await morph(growOld, growNew);
+  IdiomorphFast.morph(growOld, growNew);
   assert.strictEqual(growOld.firstChild.nextSibling.getAttribute("id"), "s2");
 
-  console.log("Parity & Keyed Identity tests passed!");
+  console.log("IdiomorphFast unit & parity tests passed!");
 }
 
 testParity().catch(err => {
